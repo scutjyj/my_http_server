@@ -1,0 +1,3 @@
+(1)think about the tcp connection timeout setting.
+We should decide how long should the http server wait for the request after establishing the TCP connection.
+Otherwise, if every client occupy the port for a long time, the system resource of the http server will run out.
