@@ -1,3 +1,8 @@
 (1)think about the tcp connection timeout setting.
 We should decide how long should the http server wait for the request after establishing the TCP connection.
 Otherwise, if every client occupy the port for a long time, the system resource of the http server will run out.
+
+(2)think about the thread exiting problem.
+When the main thread receive the STOP SINGAL, the main thread stop running and wait for other threads stopping.
+What if the child thread is sending a file with huge size and the main thread must stop this thread?
+It seems we can use the threading.Event to solve this problem.
