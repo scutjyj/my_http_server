@@ -15,10 +15,15 @@ CONNECTION_TIMEOUT = 120
 CONNECTION_INTERVAL = 30
 RECV_TIMEOUT = 1
 RECV_SIZE = 1024
+SEND_SIZE = 1024
 REQUEST_HEADER_END = '\r\n\r\n'
 STATIC_ROOT = os.getcwd()
 HOME_PAGE_FILE = 'index.html'
 NOT_FOUND_PAGE = '404.html'
+
+# the STOP_SIGN is a mutable variable used for synchrozing the multi threads.
+# notes: the  STOP_SIGN must be mutable,i.e, it can not be string.
+STOP_SIGN = []
 
 
 def main_http_server(host=HOST, port=PORT, *args):
@@ -46,8 +51,19 @@ def main_http_server(host=HOST, port=PORT, *args):
                 t.setName(cli_addr[0] + ':' + str(cli_addr[1]))
                 thread_list.append(t)
                 t.start()
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            print e
+            print 'Stop my http server!'
+            # close the serving sock.
+            s.close()
+            STOP_SIGN.append('stop')
+            for t in thread_list:
+                thread_name = t.getName()
+                print 'stopping the thread[%s]...' % thread_name
+                t.join()
+                print 'the thread[%s] has been stopped!' % thread_name
             break
+    """
     print 'Stop my http server!'
     for t in thread_list:
         thread_name = t.getName()
@@ -55,6 +71,7 @@ def main_http_server(host=HOST, port=PORT, *args):
         t.join()
         print 'the thread[%s] has been stopped!' % thread_name
     s.close()
+    """
 
 
 def parse_request_header(request_header):
@@ -110,7 +127,7 @@ def handle_request(cli_sock, cli_addr):
     if len(request_header) > 0 and request_header[-4:] == REQUEST_HEADER_END:
         # parse request header.
         request_header_dict = parse_request_header(request_header[:-4])
-
+        print request_header_dict
         # handle request.In fact, this is what application program should do.
         request_method = request_header_dict.get('request_method', '')
         if request_method == 'GET':
@@ -172,15 +189,25 @@ def handle_request(cli_sock, cli_addr):
         cli_sock.send(response_header_content.format(response_code=http_response_code, content_type=content_type,
                                                      response_desc=response_desc_dict[http_response_code],
                                                      content_length=content_length))
-        """
-        it seems we can not catch the KeyboardInterrupt exception here because the main thread has catched it?
-        try:
-            cli_sock.send(response_body_content)
-        except KeyboardInterrupt:
-            print 'get the KeyboardInterrupt signal!'
-        """
-        # TODO: what if the size of the file is too huge?
-        cli_sock.send(response_body_content)
+
+        # To stop the thread blocked by sending a huge file as soon as possible, send the file in piece.
+        tmp_pos = 0
+        while response_body_content[tmp_pos:tmp_pos+SEND_SIZE]:
+            if not STOP_SIGN:
+                try:
+                    cli_sock.send(response_body_content[tmp_pos:tmp_pos+SEND_SIZE])
+                except socket.timeout:
+                    # In case the peer tcp window is full.
+                    continue
+                except socket.error:
+                    # the another peer close the socket.
+                    break
+                tmp_pos += SEND_SIZE
+                if tmp_pos > content_length:
+                    break
+            else:
+                break
+
     else:
         # invalid request header.
         pass
