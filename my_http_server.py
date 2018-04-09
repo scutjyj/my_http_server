@@ -156,10 +156,13 @@ def handle_request(cli_sock, cli_addr):
             if response_body_name:
                 request_url = '{path_name}{file_name}'.format(path_name=STATIC_ROOT, file_name=response_body_name)
                 print request_url
-                if os.path.exists(request_url) and not os.path.isdir(request_url):
-                    http_response_code = '200'
+                if os.path.exists(request_url):
+                    if not os.path.isdir(request_url):
+                        http_response_code = '200'
+                    else:
+                        http_response_code = '404'
                 else:
-                    http_response_code = '404'
+                    http_response_code = '301'
             else:
                 http_response_code = '404'
         else:
@@ -168,6 +171,10 @@ def handle_request(cli_sock, cli_addr):
 
         # send response.
         # If it is a general web application framework, the code below can be encapsulated as API.
+        response_desc_dict = {'200': 'OK', '301': 'Moved Permanently', '404': 'Not Found'}
+        # content type refers to the MIME standard.
+        content_type_dict = {'mp3': 'audio/mpeg', 'pdf': 'application/pdf', 'jpg': 'image/jpeg', 'css': 'text/css',
+                             'mp4': 'video/mp4'}
         if http_response_code == '404':
             if 'linux' in sys.platform:
                 path_separator = '/'
@@ -175,42 +182,45 @@ def handle_request(cli_sock, cli_addr):
                 path_separator = '\\\\'
             request_url = '{path_name}{separator}{file_name}'.format(path_name=STATIC_ROOT, separator=path_separator,
                                                                      file_name=NOT_FOUND_PAGE)
-        with open(request_url, 'rb') as fp:
-            response_body_content = fp.read()
-        content_length = len(response_body_content)
-        response_desc_dict = {'200': 'OK', '404': 'Not Found'}
-        # content type refers to the MIME standard.
-        content_type_dict = {'mp3': 'audio/mpeg', 'pdf': 'application/pdf', 'jpg': 'image/jpeg', 'css': 'text/css',
-                             'mp4': 'video/mp4'}
-        # find out the Content-Type.
-        _request_url = request_url.split('.')
-        if len(_request_url) == 2:
-            url_suffix = _request_url[1]
-        else:
-            url_suffix = ''
-        content_type = content_type_dict.get(url_suffix, 'text/html')
-        response_header_content = 'HTTP/1.1 {response_code} {response_desc}\r\nServer: jyj_web_server\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nConnection: close\r\nVary: Accept-Encoding\r\n\r\n'
-        cli_sock.send(response_header_content.format(response_code=http_response_code, content_type=content_type,
-                                                     response_desc=response_desc_dict[http_response_code],
-                                                     content_length=content_length))
 
-        # To stop the thread blocked by sending a huge file as soon as possible, send the file in piece.
-        tmp_pos = 0
-        while response_body_content[tmp_pos:tmp_pos+SEND_SIZE]:
-            if not STOP_SIGN:
-                try:
-                    cli_sock.send(response_body_content[tmp_pos:tmp_pos+SEND_SIZE])
-                except socket.timeout:
-                    # In case the peer tcp window is full.
-                    continue
-                except socket.error:
-                    # the another peer close the socket.
-                    break
-                tmp_pos += SEND_SIZE
-                if tmp_pos > content_length:
-                    break
+        if http_response_code == '301':
+            response_header_content = 'HTTP/1.1 {response_code} {response_desc}\r\nServer: jyj_web_server\r\nConnection: close\r\nVary: Accept-Encoding\r\nLocation: {redirect_url}\r\n\r\n'
+            cli_sock.send(response_header_content.format(response_code=http_response_code,
+                                                         response_desc=response_desc_dict[http_response_code],
+                                                         redirect_url='http://www.baidu.com'))
+        else:
+            with open(request_url, 'rb') as fp:
+                response_body_content = fp.read()
+            content_length = len(response_body_content)
+            # find out the Content-Type.
+            _request_url = request_url.split('.')
+            if len(_request_url) == 2:
+                url_suffix = _request_url[1]
             else:
-                break
+                url_suffix = ''
+            content_type = content_type_dict.get(url_suffix, 'text/html')
+            response_header_content = 'HTTP/1.1 {response_code} {response_desc}\r\nServer: jyj_web_server\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nConnection: close\r\nVary: Accept-Encoding\r\n\r\n'
+            cli_sock.send(response_header_content.format(response_code=http_response_code, content_type=content_type,
+                                                         response_desc=response_desc_dict[http_response_code],
+                                                         content_length=content_length))
+
+            # To stop the thread blocked by sending a huge file as soon as possible, send the file in piece.
+            tmp_pos = 0
+            while response_body_content[tmp_pos:tmp_pos+SEND_SIZE]:
+                if not STOP_SIGN:
+                    try:
+                        cli_sock.send(response_body_content[tmp_pos:tmp_pos+SEND_SIZE])
+                    except socket.timeout:
+                        # In case the peer tcp window is full.
+                        continue
+                    except socket.error:
+                        # the another peer close the socket.
+                        break
+                    tmp_pos += SEND_SIZE
+                    if tmp_pos > content_length:
+                        break
+                else:
+                    break
 
     else:
         # invalid request header.
