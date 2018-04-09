@@ -7,6 +7,7 @@ import socket
 import threading
 import select
 import urllib
+import logging
 
 HOST = '127.0.0.1'
 PORT = 800
@@ -18,12 +19,26 @@ RECV_SIZE = 1024
 SEND_SIZE = 1024
 REQUEST_HEADER_END = '\r\n\r\n'
 STATIC_ROOT = os.getcwd()
+LOG_FILE_NAME = 'my_http_server.log'
+LOG_PATH = os.path.join(STATIC_ROOT, LOG_FILE_NAME)
+SERVER_NAME = 'my_http_server'
 HOME_PAGE_FILE = 'index.html'
 NOT_FOUND_PAGE = '404.html'
 
 # the STOP_SIGN is a mutable variable used for synchrozing the multi threads.
 # notes: the  STOP_SIGN must be mutable,i.e, it can not be string.
 STOP_SIGN = []
+
+# set the logger.
+logger = logging.getLogger(SERVER_NAME)
+formatter = logging.Formatter('%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s')
+file_handler = logging.FileHandler(LOG_PATH)
+file_handler.setFormatter(formatter)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.formatter = formatter
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+logger.setLevel(logging.DEBUG)
 
 
 def main_http_server(host=HOST, port=PORT, *args):
@@ -32,46 +47,35 @@ def main_http_server(host=HOST, port=PORT, *args):
     try:
         s.bind((host, int(port)))
     except:
-        print 'Please check the host and port!!!Make sure the port is not occupied!!!'
+        logger.error('Please check the host and port!!!Make sure the port is not occupied!!!')
     s.listen(MAX_WAIT_NUM)
-    print 'Start my http server!'
+    logger.debug('Start my http server!')
     read_list = [s]
     thread_list = []
     while True:
         try:
-            print 'Waiting for connection...'
+            #logger.debug('Waiting for connection...')
             readable, writable, errored = select.select(read_list, [], [], 1)
             for _s in readable:
                 # notice: the calling of accept() is blocking type.So use select module to implement the asynchronous programming.
                 cli_sock, cli_addr = _s.accept()
-                print 'the client:%s connect to my http server!' % str(cli_addr)
+                logger.debug('the client:%s connect to my http server!' % str(cli_addr))
                 # TODO: Use thread.Event to solve the second problem in development_note.txt.
-                # TODO: Use logging module to save the log.
                 t = threading.Thread(target=handle_request, args=(cli_sock, cli_addr))
                 t.setName(cli_addr[0] + ':' + str(cli_addr[1]))
                 thread_list.append(t)
                 t.start()
-        except KeyboardInterrupt as e:
-            print e
-            print 'Stop my http server!'
+        except KeyboardInterrupt:
+            logger.debug('Stop my http server!')
             # close the serving sock.
             s.close()
             STOP_SIGN.append('stop')
             for t in thread_list:
                 thread_name = t.getName()
-                print 'stopping the thread[%s]...' % thread_name
+                logger.debug('stopping the thread[%s]...' % thread_name)
                 t.join()
-                print 'the thread[%s] has been stopped!' % thread_name
+                logger.debug('the thread[%s] has been stopped!' % thread_name)
             break
-    """
-    print 'Stop my http server!'
-    for t in thread_list:
-        thread_name = t.getName()
-        print 'stopping the thread[%s]...' % thread_name
-        t.join()
-        print 'the thread[%s] has been stopped!' % thread_name
-    s.close()
-    """
 
 
 def parse_request_header(request_header):
@@ -83,9 +87,9 @@ def parse_request_header(request_header):
             field_name, field_value = line.split(':', 1)
             ret_dict[field_name] = field_value.strip()
     except Exception as e:
-        print 'invalid header!!!'
-        print e
-        print request_header
+        logger.error('invalid header!!!')
+        logger.error('the request header is:%s' % request_header)
+        #print e
     return ret_dict
 
 
@@ -127,7 +131,7 @@ def handle_request(cli_sock, cli_addr):
     if len(request_header) > 0 and request_header[-4:] == REQUEST_HEADER_END:
         # parse request header.
         request_header_dict = parse_request_header(request_header[:-4])
-        print request_header_dict
+        logger.debug('request header:\n%s' % request_header_dict)
         # handle request.In fact, this is what application program should do.
         request_method = request_header_dict.get('request_method', '')
         if request_method == 'GET':
@@ -212,7 +216,7 @@ def handle_request(cli_sock, cli_addr):
         # invalid request header.
         pass
     cli_sock.close()
-    print 'Finished handling the request from %s' % str(cli_addr)
+    logger.debug('Finished handling the request from %s' % str(cli_addr))
 
 
 if __name__ == '__main__':
